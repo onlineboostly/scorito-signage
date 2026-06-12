@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * The layout is designed against a 1920x1080 landscape screen.
+ * Root font-size scales with viewport width (16px at 1920w), so the same
+ * proportions hold on a 4K player or a smaller dev window.
+ */
+html {
+  font-size: clamp(11px, 0.8333vw, 32px);
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden; /* signage: never show scrollbars */
+  background-color: #141413;
+}

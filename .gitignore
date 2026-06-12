@@ -1,0 +1,23 @@
+# dependencies / build output
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# env & secrets — never commit credentials
+.env
+.env.local
+.env*.local
+!.env.example
+
+# scraper artifacts — session state and page dumps stay out of the repo
+scraper/.auth/
+scraper/debug/
+
+# misc
+.vercel
+.DS_Store
+npm-debug.log*
+
+# lokale handoff-notities
+TODO.md

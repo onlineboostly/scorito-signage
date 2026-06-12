@@ -1,0 +1,85 @@
+# Scrapes Scorito every 10 minutes and writes snapshots to Supabase.
+#
+# Notes:
+# - GitHub cron is best-effort: delays of a few minutes are normal, and
+#   schedules are paused automatically after 60 days without repo activity.
+# - The Scorito session (scraper/.auth) is carried between runs via the
+#   actions cache, so the scraper rarely has to log in from scratch.
+# - While SELECTORS_CONFIRMED is false the scraper exits non-zero on purpose,
+#   so this workflow fails loudly until discovery is done.
+name: Scrape Scorito
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: scorito-scrape
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          # Browsers are installed (and cached) in the next step instead.
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # Evolving-key pattern: every run saves a fresh cache entry and the next
+      # run restores the most recent one via the restore-keys prefix.
+      - name: Restore Scorito session
+        uses: actions/cache/restore@v4
+        with:
+          path: scraper/.auth
+          key: scorito-auth-${{ github.run_id }}
+          restore-keys: |
+            scorito-auth-
+
+      - name: Scrape
+        run: npx tsx scraper/scrape.ts
+        env:
+          SCORITO_EMAIL: ${{ secrets.SCORITO_EMAIL }}
+          SCORITO_PASSWORD: ${{ secrets.SCORITO_PASSWORD }}
+          SCORITO_STANDING_URL: ${{ secrets.SCORITO_STANDING_URL }}
+          SCORITO_MATCHES_URL: ${{ secrets.SCORITO_MATCHES_URL }}
+          POOL_ID: ${{ secrets.POOL_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+      - name: Save Scorito session
+        if: always() && hashFiles('scraper/.auth/storageState.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: scraper/.auth
+          key: scorito-auth-${{ github.run_id }}
+
+      # "Fail loudly and keep the screenshot": discovery dumps and error
+      # screenshots end up here whenever the run did not succeed.
+      - name: Upload debug artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scrape-debug-${{ github.run_id }}
+          path: scraper/debug/
+          if-no-files-found: ignore
+          retention-days: 5
