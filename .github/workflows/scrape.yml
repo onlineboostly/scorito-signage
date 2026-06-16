@@ -27,7 +27,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 22+ ships a native WebSocket global, which @supabase/supabase-js
+          # requires; on Node 20 the Supabase write throws. (LTS, has WebSocket.)
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
