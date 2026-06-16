@@ -188,11 +188,16 @@ function toStatus(apiStatus: number): Match['status'] {
   return 'live';
 }
 
+/** How many recently-started and upcoming fixtures the matches page shows. */
+const RECENT_COUNT = 2;
+const UPCOMING_COUNT = 3;
+
 /**
- * Filter the full tournament match list down to the fixtures whose kickoff
- * falls on `date` (yyyy-mm-dd) in Europe/Amsterdam, and render kickoff times
- * in Amsterdam too. Both must use the Amsterdam instant — comparing the raw
- * UTC string would drop/add matches around midnight and show times 2h early.
+ * Select the fixtures for the matches page: the last RECENT_COUNT matches that
+ * have already kicked off (finished or live) plus the next UPCOMING_COUNT that
+ * are still scheduled. Times/dates are rendered in Europe/Amsterdam — the API
+ * sends UTC, so anything time-based must go through parseScoritoUtc first.
+ * `date` (today, Amsterdam) is kept for the page's Gisteren/Morgen labels.
  */
 export function parseMatches(
   payload: unknown,
@@ -204,30 +209,36 @@ export function parseMatches(
     throw new Error(`Matches payload is not a list. ${DISCOVERY_HINT}`);
   }
 
-  const matches: Match[] = env.Content.map((m) => ({
+  const sorted = env.Content.map((m) => ({
     m,
     kickoffAt: typeof m.MatchDate === 'string' ? parseScoritoUtc(m.MatchDate) : null,
   }))
     .filter(
       (x): x is { m: ApiMatch; kickoffAt: Date } =>
-        x.kickoffAt != null &&
-        !Number.isNaN(x.kickoffAt.getTime()) &&
-        amsterdamDate(x.kickoffAt) === date
+        x.kickoffAt != null && !Number.isNaN(x.kickoffAt.getTime())
     )
-    .sort((a, b) => a.kickoffAt.getTime() - b.kickoffAt.getTime())
-    .map(({ m, kickoffAt }) => {
-      const status = toStatus(m.Status);
-      return {
-        kickoff: amsterdamTime(kickoffAt),
-        home: teamMap.get(m.HomeTeamId) ?? `Team ${m.HomeTeamId}`,
-        away: teamMap.get(m.AwayTeamId) ?? `Team ${m.AwayTeamId}`,
-        // Scorito reports 0-0 for unplayed matches; only show real scores.
-        ...(status !== 'scheduled'
-          ? { homeScore: m.HomeScore, awayScore: m.AwayScore }
-          : {}),
-        status,
-      };
-    });
+    .sort((a, b) => a.kickoffAt.getTime() - b.kickoffAt.getTime());
+
+  const started = sorted.filter((x) => toStatus(x.m.Status) !== 'scheduled');
+  const scheduled = sorted.filter((x) => toStatus(x.m.Status) === 'scheduled');
+
+  // Last N started (most recent kickoffs, incl. any live match) + next N scheduled.
+  const selected = [...started.slice(-RECENT_COUNT), ...scheduled.slice(0, UPCOMING_COUNT)];
+
+  const matches: Match[] = selected.map(({ m, kickoffAt }) => {
+    const status = toStatus(m.Status);
+    return {
+      kickoff: amsterdamTime(kickoffAt),
+      dateIso: amsterdamDate(kickoffAt),
+      home: teamMap.get(m.HomeTeamId) ?? `Team ${m.HomeTeamId}`,
+      away: teamMap.get(m.AwayTeamId) ?? `Team ${m.AwayTeamId}`,
+      // Scorito reports 0-0 for unplayed matches; only show real scores.
+      ...(status !== 'scheduled'
+        ? { homeScore: m.HomeScore, awayScore: m.AwayScore }
+        : {}),
+      status,
+    };
+  });
 
   return { matches, date };
 }

@@ -31,3 +31,25 @@ export function parseIsoDate(iso: string): Date | null {
   const d = new Date(`${iso}T12:00:00Z`);
   return Number.isNaN(d.getTime()) ? null : d;
 }
+
+/**
+ * Short day label for a match relative to "today": "Gisteren" / "Morgen" /
+ * "wo 17 jun", or null when it's today (so today's rows stay label-free).
+ */
+export function relativeDayLabel(dateIso: string, todayIso: string): string | null {
+  const d = parseIsoDate(dateIso);
+  const today = parseIsoDate(todayIso);
+  if (!d || !today) return null;
+
+  const diffDays = Math.round((d.getTime() - today.getTime()) / 86_400_000);
+  if (diffDays === 0) return null;
+  if (diffDays === -1) return 'Gisteren';
+  if (diffDays === 1) return 'Morgen';
+
+  return new Intl.DateTimeFormat('nl-NL', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    timeZone: TZ,
+  }).format(d);
+}

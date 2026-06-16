@@ -1,7 +1,7 @@
 'use client';
 
 import { MATCHES_PAGE_SIZE } from '@/lib/config';
-import { formatLongDate, parseIsoDate } from '@/lib/format';
+import { relativeDayLabel } from '@/lib/format';
 import type { Match, MatchesData, SnapshotRow } from '@/lib/types';
 import EmptyState from './EmptyState';
 import ScreenShell from './ScreenShell';
@@ -34,14 +34,24 @@ function StatusCell({ status }: { status?: Match['status'] }) {
   return null;
 }
 
-function MatchRow({ match }: { match: Match }) {
+function MatchRow({ match, todayIso }: { match: Match; todayIso?: string }) {
+  const dayLabel =
+    match.dateIso && todayIso ? relativeDayLabel(match.dateIso, todayIso) : null;
+
   return (
     <li
-      className="grid min-h-0 flex-1 items-center gap-6 rounded-xl bg-white/[0.04] px-8 [grid-template-columns:8rem_1fr_12rem_1fr_10rem]"
+      className="grid min-h-0 flex-1 items-center gap-6 rounded-xl bg-white/[0.04] px-8 [grid-template-columns:9rem_1fr_12rem_1fr_10rem]"
       style={{ maxHeight: '7.5rem' }}
     >
-      <span className="font-heading text-3xl font-semibold text-bisharp-blue">
-        {match.kickoff}
+      <span className="flex flex-col leading-none">
+        {dayLabel ? (
+          <span className="mb-1.5 font-body text-lg text-bisharp-light/45">
+            {dayLabel}
+          </span>
+        ) : null}
+        <span className="font-heading text-3xl font-semibold text-bisharp-blue">
+          {match.kickoff}
+        </span>
       </span>
       <span className="min-w-0 truncate text-right font-body text-3xl">
         {match.home}
@@ -65,14 +75,13 @@ type Props = {
 export default function MatchesBoard({ poolId, initial }: Props) {
   const snapshot = useLatestSnapshot<MatchesData>(poolId, 'matches', initial);
   const matches = snapshot?.data.matches ?? [];
+  const todayIso = snapshot?.data.date;
   const { pageItems, pager } = usePager(matches, MATCHES_PAGE_SIZE);
-
-  const matchDate = snapshot?.data.date ? parseIsoDate(snapshot.data.date) : null;
 
   return (
     <ScreenShell
-      title="Wedstrijden van vandaag"
-      subtitle={matchDate ? formatLongDate(matchDate) : undefined}
+      title="Wedstrijden"
+      subtitle="Recente uitslagen & komend programma"
       scrapedAt={snapshot?.scraped_at}
       pager={pager}
     >
@@ -83,13 +92,17 @@ export default function MatchesBoard({ poolId, initial }: Props) {
         />
       ) : matches.length === 0 ? (
         <EmptyState
-          title="Geen wedstrijden vandaag"
-          subtitle="De volgende speelronde verschijnt hier automatisch."
+          title="Geen wedstrijden gevonden"
+          subtitle="Zodra er een programma bekend is, verschijnt het hier automatisch."
         />
       ) : (
         <ul className="flex h-full flex-col justify-center gap-[0.5rem]">
           {pageItems.map((match, i) => (
-            <MatchRow key={`${match.kickoff}-${match.home}-${i}`} match={match} />
+            <MatchRow
+              key={`${match.dateIso}-${match.kickoff}-${match.home}-${i}`}
+              match={match}
+              todayIso={todayIso}
+            />
           ))}
         </ul>
       )}

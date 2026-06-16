@@ -9,8 +9,10 @@ export type Entry = {
 
 /** One fixture on the matches page. */
 export type Match = {
-  /** Kickoff time as displayed, e.g. "20:00". */
+  /** Kickoff time as displayed (Europe/Amsterdam), e.g. "20:00". */
   kickoff: string;
+  /** Kickoff date (yyyy-mm-dd, Europe/Amsterdam) — drives the Gisteren/Morgen label. */
+  dateIso?: string;
   home: string;
   away: string;
   homeScore?: number;

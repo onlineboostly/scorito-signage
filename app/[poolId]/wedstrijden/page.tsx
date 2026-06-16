@@ -7,7 +7,7 @@ import type { MatchesData, SnapshotRow } from '@/lib/types';
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
-  title: 'Wedstrijden van vandaag · Bisharp',
+  title: 'Wedstrijden · Bisharp',
 };
 
 export default async function WedstrijdenPage({
