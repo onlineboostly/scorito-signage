@@ -45,7 +45,11 @@ type ApiMatch = {
   Status: number;
   HomeScore: number;
   AwayScore: number;
-  /** Dutch wall time without offset, e.g. "2026-06-14T20:00:00". */
+  /**
+   * UTC, but serialized WITHOUT a timezone marker, e.g. "2026-06-14T20:00:00"
+   * = 20:00Z = 22:00 Amsterdam (summer). Confirmed 2026-06-16 by comparing to
+   * Scorito's own displayed times. Always read it through parseScoritoUtc().
+   */
   MatchDate: string;
   PlayMinute?: string;
 };
@@ -66,14 +70,39 @@ function asEnvelope<T>(payload: unknown, what: string): ApiEnvelope<T> {
   return payload as ApiEnvelope<T>;
 }
 
+const TZ = 'Europe/Amsterdam';
+
 /** Today's date (yyyy-mm-dd) in Europe/Amsterdam. */
 export function todayInAmsterdam(): string {
+  return amsterdamDate(new Date());
+}
+
+/**
+ * Parse a Scorito MatchDate. The API sends UTC wall-clock without an offset
+ * ("2026-06-16T19:00:00" = 19:00Z), so append 'Z' unless one is already there.
+ */
+export function parseScoritoUtc(raw: string): Date {
+  const hasTz = /([zZ]|[+-]\d{2}:?\d{2})$/.test(raw);
+  return new Date(hasTz ? raw : `${raw}Z`);
+}
+
+/** yyyy-mm-dd for an instant, in Europe/Amsterdam. */
+function amsterdamDate(d: Date): string {
   return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Amsterdam',
+    timeZone: TZ,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(new Date());
+  }).format(d);
+}
+
+/** "21:00" — kickoff time for an instant, in Europe/Amsterdam (24h). */
+function amsterdamTime(d: Date): string {
+  return new Intl.DateTimeFormat('nl-NL', {
+    timeZone: TZ,
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(d);
 }
 
 /** One page of the pool ranking. */
@@ -159,7 +188,12 @@ function toStatus(apiStatus: number): Match['status'] {
   return 'live';
 }
 
-/** Filter the full tournament match list down to one day's fixtures. */
+/**
+ * Filter the full tournament match list down to the fixtures whose kickoff
+ * falls on `date` (yyyy-mm-dd) in Europe/Amsterdam, and render kickoff times
+ * in Amsterdam too. Both must use the Amsterdam instant — comparing the raw
+ * UTC string would drop/add matches around midnight and show times 2h early.
+ */
 export function parseMatches(
   payload: unknown,
   teamMap: Map<number, string>,
@@ -170,14 +204,21 @@ export function parseMatches(
     throw new Error(`Matches payload is not a list. ${DISCOVERY_HINT}`);
   }
 
-  const matches: Match[] = env.Content.filter(
-    (m) => typeof m.MatchDate === 'string' && m.MatchDate.startsWith(date)
-  )
-    .sort((a, b) => a.MatchDate.localeCompare(b.MatchDate))
-    .map((m) => {
+  const matches: Match[] = env.Content.map((m) => ({
+    m,
+    kickoffAt: typeof m.MatchDate === 'string' ? parseScoritoUtc(m.MatchDate) : null,
+  }))
+    .filter(
+      (x): x is { m: ApiMatch; kickoffAt: Date } =>
+        x.kickoffAt != null &&
+        !Number.isNaN(x.kickoffAt.getTime()) &&
+        amsterdamDate(x.kickoffAt) === date
+    )
+    .sort((a, b) => a.kickoffAt.getTime() - b.kickoffAt.getTime())
+    .map(({ m, kickoffAt }) => {
       const status = toStatus(m.Status);
       return {
-        kickoff: m.MatchDate.slice(11, 16),
+        kickoff: amsterdamTime(kickoffAt),
         home: teamMap.get(m.HomeTeamId) ?? `Team ${m.HomeTeamId}`,
         away: teamMap.get(m.AwayTeamId) ?? `Team ${m.AwayTeamId}`,
         // Scorito reports 0-0 for unplayed matches; only show real scores.
