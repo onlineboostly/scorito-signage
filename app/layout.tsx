@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Lora, Poppins } from 'next/font/google';
+import AutoRefresh from '@/components/AutoRefresh';
 import './globals.css';
 
 const poppins = Poppins({
@@ -28,6 +29,7 @@ export default function RootLayout({
   return (
     <html lang="nl" className={`${poppins.variable} ${lora.variable}`}>
       <body className="h-full bg-bisharp-dark font-body text-bisharp-light antialiased">
+        <AutoRefresh seconds={300} />
         {children}
       </body>
     </html>
