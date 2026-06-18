@@ -362,12 +362,21 @@ async function saveFailureArtifacts(page: Page | undefined): Promise<void> {
   }
 }
 
+/** True when at least one entry in a stored snapshot carries a userId. */
+function entriesHaveUserId(data: unknown): boolean {
+  const entries = ((data as StandingData)?.entries ?? []) as Entry[];
+  return entries.some((e) => typeof e.userId === 'number');
+}
+
 /**
  * Annotate each standing entry with the points it gained *today*
- * (Europe/Amsterdam): current total minus the total at the last snapshot taken
- * before midnight. Left blank when there is no reasonably-recent baseline —
- * e.g. before the scheduled scraper has built up same-day history — so the
- * screen shows a neutral dot instead of a misleading multi-day jump.
+ * (Europe/Amsterdam): current total minus the total at a baseline snapshot.
+ *
+ * Baseline = the last snapshot from before midnight (yesterday's end). On the
+ * first days of userId tracking that older snapshot has no userIds to match on,
+ * so we fall back to the earliest userId-bearing snapshot of today — i.e.
+ * "gained since tracking began today". Left blank only when neither exists, so
+ * the screen shows a neutral dot instead of a misleading multi-day jump.
  */
 async function annotateDailyGain(
   env: ScraperEnv,
@@ -382,36 +391,61 @@ async function annotateDailyGain(
       `${todayInAmsterdam()}T00:00:00+02:00`
     ).toISOString();
 
-    const { data, error } = await db
+    let baseline: { data: unknown; scraped_at: string } | null = null;
+    let baselineKind = '';
+
+    // Preferred: the most recent pre-midnight snapshot that carries userIds and
+    // isn't stale (a scheduler gap shouldn't turn into a multi-day "gain").
+    const prev = await db
       .from('pool_snapshots')
       .select('data, scraped_at')
       .eq('pool_id', env.poolId)
       .eq('kind', 'standing')
       .lt('scraped_at', startOfToday)
       .order('scraped_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) {
-      log('Daily-gain baseline query failed (non-fatal):', error.message);
-      return;
+      .limit(5);
+    if (!prev.error && prev.data) {
+      for (const row of prev.data) {
+        const ageHours =
+          (Date.now() - new Date(row.scraped_at).getTime()) / 3_600_000;
+        if (ageHours <= 30 && entriesHaveUserId(row.data)) {
+          baseline = row as { data: unknown; scraped_at: string };
+          baselineKind = 'yesterday';
+          break;
+        }
+      }
     }
-    if (!data) {
-      log('No snapshot from before today yet — daily gain left blank.');
-      return;
+
+    // Fallback (first days of tracking): the earliest userId snapshot of today.
+    // The limit must clear today's pre-userId rows (old cron runs sort first),
+    // so allow a full day of 15-min snapshots plus margin.
+    if (!baseline) {
+      const today = await db
+        .from('pool_snapshots')
+        .select('data, scraped_at')
+        .eq('pool_id', env.poolId)
+        .eq('kind', 'standing')
+        .gte('scraped_at', startOfToday)
+        .order('scraped_at', { ascending: true })
+        .limit(150);
+      if (!today.error && today.data) {
+        for (const row of today.data) {
+          if (entriesHaveUserId(row.data)) {
+            baseline = row as { data: unknown; scraped_at: string };
+            baselineKind = 'today-start';
+            break;
+          }
+        }
+      }
     }
 
-    const ageHours =
-      (Date.now() - new Date(data.scraped_at).getTime()) / 3_600_000;
-    if (ageHours > 30) {
-      log(
-        `Most recent baseline is ${ageHours.toFixed(0)}h old (scheduler gap?) — daily gain left blank.`
-      );
+    if (!baseline) {
+      log('No usable baseline with userIds yet — daily gain left blank.');
       return;
     }
 
     const baseTotals = new Map<number, number>();
-    for (const e of ((data.data as StandingData)?.entries ?? []) as Entry[]) {
+    for (const e of ((baseline.data as StandingData)?.entries ?? []) as Entry[]) {
       if (typeof e.userId === 'number') baseTotals.set(e.userId, e.points);
     }
 
@@ -424,7 +458,7 @@ async function annotateDailyGain(
     }
     log(
       `Daily gain set for ${annotated}/${standing.entries.length} entries ` +
-        `(baseline ${data.scraped_at}).`
+        `(baseline ${baseline.scraped_at}, ${baselineKind}).`
     );
   } catch (err) {
     log(
