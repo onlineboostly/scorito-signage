@@ -24,6 +24,14 @@ function Movement({ value }: { value?: number }) {
   );
 }
 
+function RoundPoints({ value }: { value?: number }) {
+  // Points gained in the most recent round; a muted dot when there's nothing new.
+  if (!value || value <= 0) {
+    return <span className="text-bisharp-light/25">·</span>;
+  }
+  return <span className="text-bisharp-blue">+{formatPoints(value)}</span>;
+}
+
 function StandingRow({ entry }: { entry: Entry }) {
   const style = RANK_STYLES[entry.rank] ?? {
     badge: 'bg-white/[0.08] text-bisharp-light/80',
@@ -45,6 +53,9 @@ function StandingRow({ entry }: { entry: Entry }) {
       </span>
       <span className="w-24 shrink-0 text-center font-heading text-2xl font-semibold">
         <Movement value={entry.movement} />
+      </span>
+      <span className="w-28 shrink-0 text-center font-heading text-3xl font-bold tabular-nums">
+        <RoundPoints value={entry.roundPoints} />
       </span>
       <span className="w-44 shrink-0 text-right font-heading text-4xl font-bold tabular-nums">
         {formatPoints(entry.points)}

@@ -15,7 +15,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createClient } from '@supabase/supabase-js';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
-import type { MatchesData, StandingData } from '../lib/types';
+import type { Entry, MatchesData, StandingData } from '../lib/types';
 import { readEnv, type ScraperEnv } from './env';
 import {
   assembleStanding,
@@ -362,6 +362,78 @@ async function saveFailureArtifacts(page: Page | undefined): Promise<void> {
   }
 }
 
+/**
+ * Annotate each standing entry with the points it gained *today*
+ * (Europe/Amsterdam): current total minus the total at the last snapshot taken
+ * before midnight. Left blank when there is no reasonably-recent baseline —
+ * e.g. before the scheduled scraper has built up same-day history — so the
+ * screen shows a neutral dot instead of a misleading multi-day jump.
+ */
+async function annotateDailyGain(
+  env: ScraperEnv,
+  standing: StandingData
+): Promise<void> {
+  try {
+    const db = createClient(env.supabaseUrl, env.serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    // WK 2026 runs Jun–Jul, so Amsterdam is on CEST (+02:00) the whole time.
+    const startOfToday = new Date(
+      `${todayInAmsterdam()}T00:00:00+02:00`
+    ).toISOString();
+
+    const { data, error } = await db
+      .from('pool_snapshots')
+      .select('data, scraped_at')
+      .eq('pool_id', env.poolId)
+      .eq('kind', 'standing')
+      .lt('scraped_at', startOfToday)
+      .order('scraped_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      log('Daily-gain baseline query failed (non-fatal):', error.message);
+      return;
+    }
+    if (!data) {
+      log('No snapshot from before today yet — daily gain left blank.');
+      return;
+    }
+
+    const ageHours =
+      (Date.now() - new Date(data.scraped_at).getTime()) / 3_600_000;
+    if (ageHours > 30) {
+      log(
+        `Most recent baseline is ${ageHours.toFixed(0)}h old (scheduler gap?) — daily gain left blank.`
+      );
+      return;
+    }
+
+    const baseTotals = new Map<number, number>();
+    for (const e of ((data.data as StandingData)?.entries ?? []) as Entry[]) {
+      if (typeof e.userId === 'number') baseTotals.set(e.userId, e.points);
+    }
+
+    let annotated = 0;
+    for (const e of standing.entries) {
+      if (typeof e.userId === 'number' && baseTotals.has(e.userId)) {
+        e.roundPoints = Math.max(0, e.points - (baseTotals.get(e.userId) as number));
+        annotated++;
+      }
+    }
+    log(
+      `Daily gain set for ${annotated}/${standing.entries.length} entries ` +
+        `(baseline ${data.scraped_at}).`
+    );
+  } catch (err) {
+    log(
+      'Daily-gain annotation failed (non-fatal):',
+      err instanceof Error ? err.message : err
+    );
+  }
+}
+
 async function writeSnapshots(
   env: ScraperEnv,
   standingData: StandingData,
@@ -452,6 +524,7 @@ async function main(): Promise<void> {
     const standingData = await scrapeStanding(page, env);
     log(`Standing: ${standingData.entries.length} entries` +
       (standingData.poolName ? ` (pool: ${standingData.poolName})` : ''));
+    await annotateDailyGain(env, standingData);
 
     log('Scraping matches…');
     const matchesData = await scrapeMatches(page, env);

@@ -5,6 +5,10 @@ export type Entry = {
   points: number;
   /** Places climbed (positive) or dropped (negative) since the previous round. */
   movement?: number;
+  /** Points gained so far today (Europe/Amsterdam), derived by diffing snapshots; omitted when unknown. */
+  roundPoints?: number;
+  /** Scorito user id — used to match an entry across snapshots; never displayed. */
+  userId?: number;
 };
 
 /** One fixture on the matches page. */

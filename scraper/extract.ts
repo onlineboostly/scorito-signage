@@ -142,6 +142,10 @@ export function assembleStanding(
       name: item.UserName,
       points: item.TotalPoints ?? 0,
       movement: typeof item.Delta === 'number' ? -item.Delta : undefined,
+      // roundPoints (points gained today) is filled in later by the scraper,
+      // by diffing against an earlier snapshot — Scorito's RoundPoints in the
+      // overall ranking just mirrors TotalPoints, so it is not usable here.
+      userId: typeof item.UserId === 'number' ? item.UserId : undefined,
     }));
 
   if (entries.length === 0) {
